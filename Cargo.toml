@@ -1,0 +1,13 @@
+[package]
+name = "plopaf"
+description = "Plot a PAF file to view alignments."
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.89"
+boomphf = "0.6.0"
+clap = { version = "4.5.19", features = ["cargo"] }
+itertools = "0.13.0"
+paf = "0.1.12"
+plotters = "0.3.7"
