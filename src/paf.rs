@@ -84,6 +84,11 @@ impl AlignedSeqs {
             index += 1;
         }
     }
+
+    // get the hash of the sequence ID
+    fn hash(&self, name: &str) -> u64 {
+        self.mphf.hash(&name.to_string())
+    }
 }
 
 #[derive(Debug)]
@@ -96,6 +101,7 @@ pub struct PAFSeqs {
 
 impl PAFSeqs {
     // Create the target and query sequences from a PAF file.
+    // check that we have cigar strings at the same time
     pub fn new(filename: PathBuf) -> Result<Self> {
         // a global reader for the PAF file
         let mut reader = Reader::from_path(filename.clone())?;
@@ -107,6 +113,10 @@ impl PAFSeqs {
             // get target and query names from the PAF file
             for record in reader.records() {
                 let record = record?;
+                // check we have a cigar string
+                if record.cg().is_none() {
+                    return Err(anyhow::anyhow!("PAF file must contain cigar strings"));
+                }
                 // get query and target names
                 qn.insert(record.query_name().to_string());
                 tn.insert(record.target_name().to_string());
@@ -163,5 +173,118 @@ impl PAFSeqs {
         targets.seqs.sort_by(|a, b| a.id.cmp(&b.id));
 
         Ok(Self { targets, queries })
+    }
+}
+
+// we need a structure to iterate over the lines of a PAF file
+
+pub struct PAFRecords<R> {
+    // the records
+    records: RecordsIntoIter<R>,
+    // the paf seqs object
+    paf_seqs: PAFSeqs,
+}
+
+impl PAFRecords<std::fs::File> {
+    pub fn new(filename: PathBuf) -> Result<Self> {
+        let paf_seqs = PAFSeqs::new(filename.clone())?;
+        let records = Reader::from_path(filename)?.into_records();
+        Ok(Self { records, paf_seqs })
+    }
+}
+
+// this is the output structure we will make our plot from
+#[derive(Debug)]
+pub struct Out {
+    pub cigar: char,
+    pub x: usize,
+    pub rev: bool,
+    pub y: usize,
+    pub len: usize,
+}
+
+#[derive(Debug)]
+pub struct OutVec(pub Vec<Out>);
+
+impl OutVec {
+    // push an out to the vector
+    pub fn push(&mut self, out: Out) {
+        self.0.push(out);
+    }
+}
+
+impl Iterator for PAFRecords<std::fs::File> {
+    type Item = Result<OutVec>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let current_record = match self.records.next() {
+            // should be safe to unwrap here because we already iterated
+            // over the PAF once before, and any errors would have been
+            // picked up on then.
+            Some(r) => r.unwrap(),
+            // otherwise we've reached the end of the iterator
+            None => return None,
+        };
+
+        let query_rev = current_record.strand() == '-';
+
+        let query_id = self.paf_seqs.queries.hash(current_record.query_name()) as usize;
+        let target_id = self.paf_seqs.targets.hash(current_record.target_name()) as usize;
+
+        // get the global target start
+        let mut target_start = self.paf_seqs.targets.seqs[target_id].offset as usize
+            + current_record.target_start() as usize;
+
+        // and the global query start
+        let mut query_start = match query_rev {
+            true => {
+                self.paf_seqs.queries.seqs[query_id].offset as usize
+                    + current_record.query_end() as usize
+            }
+            false => {
+                self.paf_seqs.queries.seqs[query_id].offset as usize
+                    + current_record.query_start() as usize
+            }
+        };
+
+        // deal with the cigar strings
+        // assume we have cigar strings on every line
+        let cigar = current_record.cg().unwrap();
+
+        let mut first = 0;
+        let mut outvec = OutVec(Vec::new());
+
+        for (index, byte) in cigar.bytes().enumerate() {
+            match byte {
+                // if we have an M, we need to add the number of M's to the start
+                b'M' | b'=' | b'X' => {
+                    let n = cigar[first..index].parse::<usize>().unwrap();
+
+                    let out = Out {
+                        cigar: byte as char,
+                        x: query_start,
+                        rev: query_rev,
+                        y: target_start,
+                        len: n,
+                    };
+                    outvec.push(out);
+                    query_start += if query_rev { 0 - n } else { n };
+                    target_start += n;
+                    first = index + 1;
+                }
+                b'D' => {
+                    let n = cigar[first..index].parse::<usize>().unwrap();
+                    target_start += n;
+                    first = index + 1;
+                }
+                b'I' => {
+                    let n = cigar[first..index].parse::<usize>().unwrap();
+                    query_start += if query_rev { 0 - n } else { n };
+                    first = index + 1;
+                }
+                _ => (),
+            }
+        }
+        Some(Ok(outvec))
     }
 }

@@ -28,7 +28,13 @@ pub fn parse_args() -> ArgMatches {
 
 pub fn run(matches: ArgMatches) {
     let paf_file = matches.get_one::<PathBuf>("PAF").unwrap().clone();
-    let paf = paf::PAFSeqs::new(paf_file).unwrap();
 
-    println!("{:#?}", paf);
+    let paf_records = paf::PAFRecords::new(paf_file).unwrap();
+
+    for outvec in paf_records {
+        let outvec = outvec.unwrap();
+        for out in outvec.0 {
+            println!("{:?}", out);
+        }
+    }
 }
