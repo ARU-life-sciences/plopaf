@@ -29,12 +29,14 @@ pub fn parse_args() -> ArgMatches {
 pub fn run(matches: ArgMatches) {
     let paf_file = matches.get_one::<PathBuf>("PAF").unwrap().clone();
 
-    let paf_records = paf::PAFRecords::new(paf_file).unwrap();
+    let coords = paf::generate_alignment_coords(paf_file).unwrap();
 
-    for outvec in paf_records {
-        let outvec = outvec.unwrap();
-        for out in outvec.0 {
-            println!("{:?}", out);
+    for coord in coords {
+        for el in coord.0 {
+            println!(
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                el.query_name, el.target_name, el.cigar, el.x, el.rev, el.y, el.len
+            );
         }
     }
 }

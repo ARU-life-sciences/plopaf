@@ -176,8 +176,6 @@ impl PAFSeqs {
     }
 }
 
-// we need a structure to iterate over the lines of a PAF file
-
 pub struct PAFRecords<R> {
     // the records
     records: RecordsIntoIter<R>,
@@ -195,26 +193,28 @@ impl PAFRecords<std::fs::File> {
 
 // this is the output structure we will make our plot from
 #[derive(Debug)]
-pub struct Out {
+pub struct CigarCoord {
     pub cigar: char,
     pub x: usize,
+    pub query_name: String,
     pub rev: bool,
     pub y: usize,
+    pub target_name: String,
     pub len: usize,
 }
 
 #[derive(Debug)]
-pub struct OutVec(pub Vec<Out>);
+pub struct CigarCoords(pub Vec<CigarCoord>);
 
-impl OutVec {
+impl CigarCoords {
     // push an out to the vector
-    pub fn push(&mut self, out: Out) {
+    pub fn push(&mut self, out: CigarCoord) {
         self.0.push(out);
     }
 }
 
 impl Iterator for PAFRecords<std::fs::File> {
-    type Item = Result<OutVec>;
+    type Item = Result<CigarCoords>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let current_record = match self.records.next() {
@@ -227,9 +227,11 @@ impl Iterator for PAFRecords<std::fs::File> {
         };
 
         let query_rev = current_record.strand() == '-';
+        let query_name = current_record.query_name();
+        let target_name = current_record.target_name();
 
-        let query_id = self.paf_seqs.queries.hash(current_record.query_name()) as usize;
-        let target_id = self.paf_seqs.targets.hash(current_record.target_name()) as usize;
+        let query_id = self.paf_seqs.queries.hash(query_name) as usize;
+        let target_id = self.paf_seqs.targets.hash(target_name) as usize;
 
         // get the global target start
         let mut target_start = self.paf_seqs.targets.seqs[target_id].offset as usize
@@ -252,7 +254,7 @@ impl Iterator for PAFRecords<std::fs::File> {
         let cigar = current_record.cg().unwrap();
 
         let mut first = 0;
-        let mut outvec = OutVec(Vec::new());
+        let mut outvec = CigarCoords(Vec::new());
 
         for (index, byte) in cigar.bytes().enumerate() {
             match byte {
@@ -260,11 +262,13 @@ impl Iterator for PAFRecords<std::fs::File> {
                 b'M' | b'=' | b'X' => {
                     let n = cigar[first..index].parse::<usize>().unwrap();
 
-                    let out = Out {
+                    let out = CigarCoord {
                         cigar: byte as char,
                         x: query_start,
+                        query_name: query_name.to_string(),
                         rev: query_rev,
                         y: target_start,
+                        target_name: target_name.to_string(),
                         len: n,
                     };
                     outvec.push(out);
@@ -287,4 +291,10 @@ impl Iterator for PAFRecords<std::fs::File> {
         }
         Some(Ok(outvec))
     }
+}
+
+// wrapper to conveniently wrap APIs above
+pub fn generate_alignment_coords(filename: PathBuf) -> Result<Vec<CigarCoords>> {
+    let paf_records = PAFRecords::new(filename)?;
+    paf_records.into_iter().collect()
 }
