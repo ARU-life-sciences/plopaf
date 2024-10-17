@@ -1,24 +1,24 @@
 use std::path::PathBuf;
 
-use crate::paf::{CigarCoord, CigarCoords};
+use crate::paf::{CigarCoord, CigarCoordsIter};
 use anyhow::Result;
 use plotters::prelude::*;
 
 // first of all render a simple scatterplot using Vec<CigarCoords>
-pub fn plot(coords: Vec<CigarCoords>, out: PathBuf) -> Result<()> {
+pub fn plot(coords: CigarCoordsIter, out: PathBuf, filter_primary_alignments: bool) -> Result<()> {
     let root = BitMapBackend::new(&out, (640, 480)).into_drawing_area();
     root.fill(&WHITE)?;
 
     // get the max x and y values to set the range of the plot
     let max_x = coords
-        .iter()
-        .map(|c| c.0.iter().map(|cc| cc.x).max().unwrap())
+        .iter(filter_primary_alignments)
+        .map(|c| c.x)
         .max()
         .unwrap();
 
     let max_y = coords
-        .iter()
-        .map(|c| c.0.iter().map(|cc| cc.y).max().unwrap())
+        .iter(filter_primary_alignments)
+        .map(|c| c.y)
         .max()
         .unwrap();
 
@@ -48,14 +48,11 @@ pub fn plot(coords: Vec<CigarCoords>, out: PathBuf) -> Result<()> {
         .y_label_formatter(format_axis_numbers)
         .draw()?;
 
-    for coord in coords {
-        chart.draw_series(
-            coord
-                .0
-                .iter()
-                .map(|CigarCoord { x, y, .. }| Pixel::new((*x as u32, *y as u32), &BLACK)),
-        )?;
-    }
+    chart.draw_series(
+        coords
+            .iter(filter_primary_alignments)
+            .map(|CigarCoord { x, y, .. }| Pixel::new((*x as u32, *y as u32), &BLACK)),
+    )?;
 
     Ok(())
 }

@@ -43,18 +43,12 @@ struct AlignedSeqs {
     seqs: Vec<AlignedSeq>,
     // map from sequence name to internal ID
     mphf: Mphf<String>,
-    // axis length
-    axis_length: f64,
 }
 
 impl AlignedSeqs {
     // set the axis length to be zero, we'll calculate this later
     fn new(seqs: Vec<AlignedSeq>, mphf: Mphf<String>) -> Self {
-        Self {
-            seqs,
-            mphf,
-            axis_length: 0.0,
-        }
+        Self { seqs, mphf }
     }
 
     // get the id from a sequence name
@@ -181,13 +175,20 @@ pub struct PAFRecords<R> {
     records: RecordsIntoIter<R>,
     // the paf seqs object
     paf_seqs: PAFSeqs,
+    // whether we are only interested in primary alignments
+    filter_secondary_alignments: bool,
 }
 
 impl PAFRecords<std::fs::File> {
-    pub fn new(filename: PathBuf) -> Result<Self> {
+    pub fn new(filename: PathBuf, filter_secondary_alignments: bool) -> Result<Self> {
         let paf_seqs = PAFSeqs::new(filename.clone())?;
         let records = Reader::from_path(filename)?.into_records();
-        Ok(Self { records, paf_seqs })
+
+        Ok(Self {
+            records,
+            paf_seqs,
+            filter_secondary_alignments,
+        })
     }
 }
 
@@ -198,6 +199,7 @@ pub struct CigarCoord {
     pub x: usize,
     pub query_name: String,
     pub rev: bool,
+    pub primary_alignment: bool,
     pub y: usize,
     pub target_name: String,
     pub len: usize,
@@ -210,6 +212,38 @@ impl CigarCoords {
     // push an out to the vector
     pub fn push(&mut self, out: CigarCoord) {
         self.0.push(out);
+    }
+}
+
+pub struct CigarCoordsIter<'a> {
+    vec: &'a Vec<&'a CigarCoords>,
+}
+
+impl<'a> CigarCoordsIter<'a> {
+    // constructor
+    pub fn new(vec: &'a Vec<&'a CigarCoords>) -> Self {
+        Self { vec }
+    }
+
+    // iter()
+    pub fn iter(
+        &self,
+        filter_primary_alignments: bool,
+    ) -> Box<dyn Iterator<Item = &CigarCoord> + '_> {
+        if filter_primary_alignments {
+            Box::new(
+                self.vec
+                    .iter()
+                    .flat_map(|cigar_coords| cigar_coords.0.iter())
+                    .filter(|e| e.primary_alignment == true),
+            )
+        } else {
+            Box::new(
+                self.vec
+                    .iter()
+                    .flat_map(|cigar_coords| cigar_coords.0.iter()),
+            )
+        }
     }
 }
 
@@ -252,6 +286,17 @@ impl Iterator for PAFRecords<std::fs::File> {
         // deal with the cigar strings
         // assume we have cigar strings on every line
         let cigar = current_record.cg().unwrap();
+        let is_primary = match self.filter_secondary_alignments {
+            true => match current_record.tp() {
+                Some(t) => *t == 'P',
+                None => {
+                    return Some(Err(anyhow::anyhow!(
+                        "PAF file must contain 'tp' tag if filter_secondary_alignments is true"
+                    )))
+                }
+            },
+            false => true,
+        };
 
         let mut first = 0;
         let mut outvec = CigarCoords(Vec::new());
@@ -267,6 +312,7 @@ impl Iterator for PAFRecords<std::fs::File> {
                         x: query_start,
                         query_name: query_name.to_string(),
                         rev: query_rev,
+                        primary_alignment: is_primary,
                         y: target_start,
                         target_name: target_name.to_string(),
                         len: n,
@@ -294,7 +340,10 @@ impl Iterator for PAFRecords<std::fs::File> {
 }
 
 // wrapper to conveniently wrap APIs above
-pub fn generate_alignment_coords(filename: PathBuf) -> Result<Vec<CigarCoords>> {
-    let paf_records = PAFRecords::new(filename)?;
+pub fn generate_alignment_coords(
+    filename: PathBuf,
+    filter_secondary_alignments: bool,
+) -> Result<Vec<CigarCoords>> {
+    let paf_records = PAFRecords::new(filename, filter_secondary_alignments)?;
     paf_records.into_iter().collect()
 }

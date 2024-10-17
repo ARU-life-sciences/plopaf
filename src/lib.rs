@@ -4,7 +4,8 @@ pub mod plot;
 use std::path::PathBuf;
 
 // a basic clap cli
-use clap::{crate_version, value_parser, Arg, ArgMatches, Command};
+use clap::{crate_version, value_parser, Arg, ArgAction, ArgMatches, Command};
+use paf::{CigarCoords, CigarCoordsIter};
 
 // entry point to the cli
 pub fn parse_args() -> ArgMatches {
@@ -32,6 +33,13 @@ pub fn parse_args() -> ArgMatches {
                 .value_parser(value_parser!(PathBuf))
                 .default_value("./paf.png"),
         )
+        .arg(
+            Arg::new("filter-primary-alignments")
+                .help("Remove secondary alignments from the plot.")
+                .short('f')
+                .long("filter-primary-alignments")
+                .action(ArgAction::SetTrue),
+        )
         .get_matches();
 
     matches
@@ -40,8 +48,14 @@ pub fn parse_args() -> ArgMatches {
 pub fn run(matches: ArgMatches) {
     let paf_file = matches.get_one::<PathBuf>("PAF").unwrap().clone();
     let out = matches.get_one::<PathBuf>("output").unwrap().clone();
+    // i.e. remove secondary alignments
+    let filter_primary_alignments = matches.get_flag("filter-primary-alignments");
 
-    let coords = paf::generate_alignment_coords(paf_file).unwrap();
+    let coords = paf::generate_alignment_coords(paf_file, filter_primary_alignments).unwrap();
+    // kind of annoying - borrow the records.
+    let coords: Vec<&CigarCoords> = coords.iter().collect();
+    // create the new iterator
+    let coordsiter = CigarCoordsIter::new(&coords);
 
-    plot::plot(coords, out).unwrap();
+    plot::plot(coordsiter, out, filter_primary_alignments).unwrap();
 }
