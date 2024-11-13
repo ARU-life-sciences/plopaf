@@ -1,7 +1,7 @@
 [package]
 name = "plopaf"
 description = "Plot a PAF file to view alignments."
-version = "0.1.1"
+version = "0.1.11"
 edition = "2021"
 repository = "https://github.com/ARU-life-sciences/plopaf"
 
